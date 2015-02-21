@@ -284,9 +284,12 @@ namespace {
           Constraint c;
           c.variable = si->getCondition();
           c.type = Constraint::EQ;
-          for (unsigned ci = 1, cie = si->getNumCases(); ci < cie; ++ci) {
-            c.literal = si->getCaseValue(ci)->getSExtValue();
-            BasicBlock* target = si->getSuccessor(ci);
+          //for (unsigned ci = 1, cie = si->getNumCases(); ci < cie; ++ci) {
+            //c.literal = si->findCaseValue(ci).getCaseValue()->getSExtValue();
+          for (SwitchInst::CaseIt it=si->case_begin(), end=si->case_end(); it!=end; it++)  {  
+            //c.literal = si->getCaseValue(ci)->getSExtValue();
+            c.literal = it.getCaseValue()->getSExtValue();
+            BasicBlock* target = si->getSuccessor(it.getCaseIndex());
             std::vector<Graph::Edge>& edges = g.getNeighbors(target);
             std::vector<Graph::Edge>::iterator e, ei;
             for (e = edges.begin(), ei = edges.end(); ei != e; ++e) {
