@@ -1,16 +1,21 @@
-#include <llvm/LLVMContext.h>
+#include <llvm/IR/LLVMContext.h>
 #include <llvm/Pass.h>
-#include <llvm/Module.h>
-#include <llvm/Type.h>
-#include <llvm/GlobalVariable.h>
-#include <llvm/Function.h>
-#include <llvm/BasicBlock.h>
-#include <llvm/DerivedTypes.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/Type.h>
+#include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/Support/CallSite.h>
-#include <llvm/Analysis/DebugInfo.h>
+#include <llvm/DebugInfo.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Analysis/ConstantFolding.h>
+
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/serialization/vector.hpp>
 
 #include <string>
 #include <vector>
@@ -60,10 +65,11 @@ namespace {
     if (Function *f = dyn_cast<Function>(v)) {
       return f;
     } else if (llvm::ConstantExpr *ce = dyn_cast<llvm::ConstantExpr>(v)) {
-      if (ce->getOpcode()==Instruction::BitCast)
-        if (Function *f = dyn_cast<Function>(ce->getOperand(0)))
-          return f;
-  
+      if (ce->getOpcode()==Instruction::BitCast) {
+        if (Function *f = dyn_cast<Function>(ce->getOperand(0))) {
+          return f; 
+        }
+      }
       // NOTE: This assert may fire, it isn't necessarily a problem and
       // can be disabled, I just wanted to know when and if it happened.
       assert(0 && "FIXME: Unresolved direct target for a constant expression.");
@@ -211,6 +217,7 @@ namespace {
     return nc;
   }
 
+  // Same constraints
   int compareConstraints(const std::vector<Constraint>& lhs, const std::vector<Constraint>& rhs) {
     if (lhs.size() != rhs.size())
       return 1;
@@ -226,7 +233,8 @@ namespace {
     return 0;
   }
 
-  void setupEdges(Module& M, Graph& g) {
+  // Add edges between BBs to CFG
+  void addEdges(Module& M, Graph& g) {
     for (Module::iterator f = M.begin(), fe = M.end(); f != fe; ++f) {
       for (Function::iterator b = f->begin(), be = f->end(); b != be; ++b) {
         BasicBlock* bb = b;
@@ -307,9 +315,8 @@ namespace {
     return (1 == vc.size() && vc[0].type == Constraint::SAT);
   }
 
-  void pruneCFG(Module& M, Graph& g, BasicBlock* target)
-  {
-    setupEdges(M, g);
+  void pruneCFG(Module& M, Graph& g, BasicBlock* target) {
+    addEdges(M, g);
 
     Constraint c;
     c.type = Constraint::SAT;
@@ -474,88 +481,7 @@ namespace {
     return src;
   }
 
-  void instrumentInit(Module& M) {
-    Function* initFunction = M.getFunction("katch_init");
-    Function* userMain = M.getFunction("main");
-    Instruction* firstInstruction = userMain->begin()->getFirstNonPHI();
-
-    CallInst::Create(initFunction, ConstantInt::get(Type::getInt64Ty(M.getContext()), (uint64_t)&*userMain->begin()), "", firstInstruction);
-  }
-
-  void instrumentBreakEdges(Module& M) {
-    Function* userMain = M.getFunction("main");
-    Function* breakFunction = M.getFunction("katch_break_edge");
-
-    Instruction* firstInstruction = userMain->begin()->getFirstNonPHI();
-    std::vector<std::pair<BasicBlock*, BasicBlock*> >::const_iterator br, bre;
-    for (br = toErase.begin(), bre = toErase.end(); br != bre; ++br) {
-      std::vector<Value*> args;
-      args.push_back(ConstantInt::get(Type::getInt64Ty(M.getContext()), (uint64_t)br->first));
-      args.push_back(ConstantInt::get(Type::getInt64Ty(M.getContext()), (uint64_t)br->second));
-      firstInstruction = CallInst::Create(breakFunction, args.begin(), args.end(), "", firstInstruction);
-    }
- }
-
-  void instrumentIndirectCalls(Module& M) {
-    Function* indirectCall = M.getFunction("katch_indirect_call");
-    for (Module::iterator f = M.begin(), fe = M.end(); f != fe; ++f) {
-      for (Function::iterator b = f->begin(), be = f->end(); b != be; ++b) {
-        for (BasicBlock::iterator i = b->begin(), ie = b->end(); i != ie; ++i) {
-          Instruction* I = &*i;
-          if (isa<CallInst>(I) || isa<InvokeInst>(I)) {
-            Function *target = getDirectCallTarget(I);
-            if (!target) {
-              CallInst::Create(indirectCall, "", I);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  void instrumentProgram(Module& M, BasicBlock* target)
-  {
-    Function *initFunction = M.getFunction("katch_init");
-    Function *transitionFunction = M.getFunction("katch_transition");
-    Function *bbSet = M.getFunction("katch_bb");
-    Function* indirectCall = M.getFunction("katch_indirect_call");
-    Function* breakFunction = M.getFunction("katch_break_edge");
-
-    if (!initFunction || !transitionFunction || !bbSet || !indirectCall || !breakFunction) {
-      errs() << "Module does not contain exepected helper function. Ensure helper functions were linked against the module.\n";
-      return;
-    }
-    if (!M.getFunction("main")) {
-      errs() << "Module does not contain the main function. Unable to proceed\n";
-      return;
-    }
-
-    instrumentBreakEdges(M);
-
-    for (Module::iterator f = M.begin(), fe = M.end(); f != fe; ++f) {
-      if (0 == f->getName().str().find("katch_"))
-        continue;
-      for (Function::iterator b = f->begin(), be = f->end(); b != be; ++b) {
-        for (BasicBlock::iterator i = b->begin(), ie = b->end(); i != ie; ++i) {
-          if (isa<CallInst>(i) && !isIntrinsicCall(i)) { //XXX: handle InvokeInst too
-              i = CallInst::Create(bbSet, ConstantInt::get(Type::getInt64Ty(M.getContext()), (uint64_t)&*b), "", ++i);
-          }
-        }
-
-        if (distances.find(&*b) != distances.end()) {
-          std::vector<Value*> transitionArgs;
-          transitionArgs.push_back(ConstantInt::get(Type::getInt64Ty(M.getContext()), (uint64_t)&*b));
-          transitionArgs.push_back(ConstantInt::get(Type::getInt32Ty(M.getContext()), distances[&*b], false));
-          Instruction* ins = b->getFirstNonPHI();
-          CallInst::Create(transitionFunction, transitionArgs.begin(), transitionArgs.end(), "", ins);
-        }
-      }
-    }
-
-    instrumentIndirectCalls(M);
-    instrumentInit(M);
-  }
-public:
+  public:
 
     static char ID;
     Coverage() : ModulePass(ID) {}
@@ -564,7 +490,6 @@ public:
       if (!getTarget())
         return false;
       BasicBlock* target = computeDistances(M);
-      instrumentProgram(M, target);
       return true;
     }
 
@@ -572,4 +497,5 @@ public:
 }
   
 char Coverage::ID = 0;
+// Register pass for llvm
 static RegisterPass<Coverage> X("coverage", "Coverage Instrumentation", false, false);

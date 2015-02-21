@@ -37,8 +37,7 @@ namespace {
     }
   }
 
-  int computeMinDistance()
-  {
+  int computeMinDistance() {
     std::map<uint64_t, BBInfo>::iterator n, ne;
     std::queue<BBInfo*> WorkList;
     for (n = graph.begin(), ne = graph.end(); n != ne; ++n)
@@ -71,8 +70,8 @@ namespace {
   }
 
   static int savedMinDistance = 32000;
-  void saveDistance()
-  {
+  
+  void saveDistance() {
     int minDistance = computeMinDistance();
     if (-1 != minDistance && minDistance < savedMinDistance) {
       std::ofstream outf(_output.c_str());

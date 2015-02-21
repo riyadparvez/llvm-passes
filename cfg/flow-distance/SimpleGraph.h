@@ -1,38 +1,49 @@
-#include <llvm/BasicBlock.h>
-#include <llvm/Value.h>
-#include <llvm/Instruction.h>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Value.h>
+#include <llvm/IR/Instruction.h>
+
 #include <map>
 #include <vector>
 #include <queue>
 #include <set>
+
 #include <stdint.h>
 
 using namespace llvm;
 
 struct Constraint {
   Constraint() : type(INVALID), variable(NULL), lastLoad(NULL), literal(0) { }
+
   bool operator==(const Constraint& other) const {
     return (type == other.type &&
             variable == other.variable &&
             lastLoad == other.lastLoad &&
             literal == other.literal);
   }
+  
   enum Type { INVALID, SAT, UNSAT, EQ, NE };
   Type type;
   Value* variable;
   Instruction* lastLoad;
   int64_t literal;
 
-  static Constraint getSat() {
+  static Constraint getSatConstraint() {
     Constraint sat;
     sat.type = SAT;
     return sat;
   }
-  static Constraint getUnsat() {
+  
+  static Constraint getUnsatConstraint() {
     Constraint unsat;
     unsat.type = UNSAT;
     return unsat;
   }
+};
+
+struct {
+  std::string file_name;
+  int start_line_no;
+  int end_line_no;
 };
 
 std::vector<Constraint> getCommonConstraints(const std::vector<Constraint>& v1, const std::vector<Constraint>& v2) {
@@ -53,16 +64,20 @@ std::vector<Constraint> getCommonConstraints(const std::vector<Constraint>& v1, 
 
 class Graph {
 public:
+  // Represents BB
   struct Node {
     std::vector<Constraint> vc;
   };
-
+  
+  // Represents branch or call
   struct Edge {
     enum Type { Br, Call };
     Type type;
-    BasicBlock* neighbor;
+    BasicBlock* destination;
+    // Is path through this BB feasible
     bool feasible;
     Node* n;
+    // Constraint on this edge
     Constraint c;
     Instruction* call;
   };
@@ -70,11 +85,12 @@ public:
   Graph() { }
   ~Graph() { }
 
-  void add(BasicBlock* src, BasicBlock* dst) {
-    add(src, dst, Graph::Edge::Br, NULL);
+  void addEdge(BasicBlock* src, BasicBlock* dst) {
+    addEdge(src, dst, Graph::Edge::Br, NULL);
   }
-  void add(BasicBlock* src, BasicBlock* dst, 
-           Graph::Edge::Type type, Instruction* call) {
+  
+  void addEdge(BasicBlock* src, BasicBlock* dst, 
+               Graph::Edge::Type type, Instruction* call) {
     Node n;
     if (nodes.find(src) == nodes.end())
       nodes[src] = n;
@@ -117,8 +133,11 @@ public:
       }
     }
   }
+  
   std::vector<Edge>& getNeighbors(BasicBlock* b) { return neighbors[b]; }
+  
   Node& getNode(BasicBlock* b) { return nodes[b]; }
+
 private:
   std::map<BasicBlock*, std::vector<Edge> > neighbors;
   std::map<BasicBlock*, Node> nodes;
