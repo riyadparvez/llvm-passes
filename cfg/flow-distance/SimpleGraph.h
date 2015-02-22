@@ -36,23 +36,6 @@ struct Constraint {
   }
 };
 
-struct {
-  std::string file_name;
-  int start_line_no;
-  int end_line_no;
-  
-  friend class boost::serialization::access;
-  // When the class Archive corresponds to an output archive, the
-  // & operator is defined similar to <<.  Likewise, when the class Archive
-  // is a type of input archive the & operator is defined similar to >>.
-  template<class Archive>
-  void serialize(Archive & ar, const unsigned int version) {
-    ar & file_name;
-    ar & start_line_no;
-    ar & end_line_no;
-  }
-};
-
 std::vector<Constraint> getCommonConstraints(const std::vector<Constraint>& v1, const std::vector<Constraint>& v2) {
   std::vector<Constraint> result;
   for (std::vector<Constraint>::const_iterator i = v1.begin(), ie = v1.end(); i != ie; ++i) {
@@ -71,9 +54,11 @@ std::vector<Constraint> getCommonConstraints(const std::vector<Constraint>& v1, 
 
 class Graph {
 public:
+
 struct Node {
 std::vector<Constraint> vc;
 };
+
 struct Edge {
 enum Type { Br, Call };
 Type type;
@@ -83,11 +68,14 @@ Node* n;
 Constraint c;
 Instruction* call;
 };
+
 Graph() { }
 ~Graph() { }
+
 void add(BasicBlock* src, BasicBlock* dst) {
 add(src, dst, Graph::Edge::Br, NULL);
 }
+
 void add(BasicBlock* src, BasicBlock* dst,
 Graph::Edge::Type type, Instruction* call) {
 Node n;
@@ -105,6 +93,7 @@ e.feasible = true;
 e.c.type = Constraint::SAT;
 edges.push_back(e);
 }
+
 void computeMinDist(BasicBlock* src, std::map<BasicBlock*, unsigned>& distances) {
   std::queue<BasicBlock*> q;
   std::set<BasicBlock*> visited;

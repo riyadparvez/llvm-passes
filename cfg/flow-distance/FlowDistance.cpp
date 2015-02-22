@@ -35,7 +35,7 @@ TargetLine("target-line",
            cl::desc("Target line number"));
 
 namespace {
-  std::string getDSPIPath(DILocation Loc) {
+  std::string getFilePath(DILocation Loc) {
     std::string dir = Loc.getDirectory();
     std::string file = Loc.getFilename();
   
@@ -48,12 +48,12 @@ namespace {
     }
   }
 
-  bool getInstructionDebugInfo(const llvm::Instruction *I,
-                                                     std::string &File,
-                                                     unsigned &Line) {
+  bool getInstructionSourceLocation(const llvm::Instruction *I,
+                                    std::string &File,
+                                    unsigned &Line) {
     if (MDNode *N = I->getMetadata("dbg")) {
       DILocation Loc(N);
-      File = getDSPIPath(Loc);
+      File = getFilePath(Loc);
       Line = Loc.getLineNumber();
       return true;
     }
@@ -83,7 +83,7 @@ namespace {
     return (f ? f->isIntrinsic() : false);
   }
  
-  struct Coverage : public ModulePass {
+  struct FlowDistance : public ModulePass {
   private:
     std::string targetFile;
     unsigned targetLine;
@@ -247,18 +247,18 @@ namespace {
           Value* v = branch->getCondition();
           ICmpInst* icmp = dyn_cast<ICmpInst>(v);
           if (icmp && icmp->isEquality()) { // EQ or NE
-            ConstantInt* literal = dyn_cast<ConstantInt>(icmp->getOperand(0));
+            ConstantInt* const_val = dyn_cast<ConstantInt>(icmp->getOperand(0));
             LoadInst* variable = dyn_cast<LoadInst>(icmp->getOperand(1));
-            if (!literal || !variable) {
-              literal = dyn_cast<ConstantInt>(icmp->getOperand(1));
+            if (!const_val || !variable) {
+              const_val = dyn_cast<ConstantInt>(icmp->getOperand(1));
               variable = dyn_cast<LoadInst>(icmp->getOperand(0));
-              if (!literal || !variable)
+              if (!const_val || !variable)
                 continue;
             }
-
+            // Two constraints, one for if branch, another for else branch
             Constraint cx[2];
             cx[0].variable = cx[1].variable = variable;
-            cx[0].literal = cx[1].literal = literal->getSExtValue();
+            cx[0].const_val = cx[1].const_val = const_val->getSExtValue();
             if (icmp->getPredicate() == CmpInst::ICMP_EQ) {
               cx[0].type = Constraint::EQ;
               cx[1].type = Constraint::NE;
@@ -268,16 +268,22 @@ namespace {
             }
 
             assert(branch->getNumSuccessors() == 2 && "unexpected number of successors");
+            
             for (unsigned cnt = branch->getNumSuccessors(); cnt; --cnt) {
               BasicBlock* target = branch->getSuccessor(cnt-1);
+              /*
               std::vector<Graph::Edge>& edges = g.getNeighbors(target);
               std::vector<Graph::Edge>::iterator e, ei;
+              bool = ; 
               for (e = edges.begin(), ei = edges.end(); ei != e; ++e) {
                 if (e->neighbor == bb)
                   break;
               }
               assert (e != ei && "corresponding edge not found in graph");
-              e->c = cx[cnt-1];
+              */
+              edge_data e; 
+              e.constraint = cx[cnt-1];
+              e.type =; 
             }
           }
         } else if (SwitchInst *si = dyn_cast<SwitchInst>(ti)) {
@@ -288,8 +294,10 @@ namespace {
             //c.literal = si->findCaseValue(ci).getCaseValue()->getSExtValue();
           for (SwitchInst::CaseIt it=si->case_begin(), end=si->case_end(); it!=end; it++)  {  
             //c.literal = si->getCaseValue(ci)->getSExtValue();
-            c.literal = it.getCaseValue()->getSExtValue();
+            // XXX: ensure it's correct
+            c.const_val = it.getCaseValue()->getSExtValue();
             BasicBlock* target = si->getSuccessor(it.getCaseIndex());
+            /*
             std::vector<Graph::Edge>& edges = g.getNeighbors(target);
             std::vector<Graph::Edge>::iterator e, ei;
             for (e = edges.begin(), ei = edges.end(); ei != e; ++e) {
@@ -298,6 +306,8 @@ namespace {
             }
             assert (e != ei && "corresponding edge not found in graph");
             e->c = c;
+            */
+            
           }
         }
       }
@@ -359,9 +369,9 @@ namespace {
               if ((ci = dyn_cast<ConstantInt>(v->variable))) {
                 int64_t value = ci->getSExtValue();
                 if (v->type == Constraint::EQ)
-                  v->type = (value == v->literal ? Constraint::SAT : Constraint::UNSAT);
+                  v->type = (value == v->const_val ? Constraint::SAT : Constraint::UNSAT);
                 else
-                  v->type = (value != v->literal ? Constraint::SAT : Constraint::UNSAT);
+                  v->type = (value != v->const_val ? Constraint::SAT : Constraint::UNSAT);
               } else {
                 //errs() << "Don't know how to process constant: " << *v->variable << "\n";
               }
@@ -439,7 +449,7 @@ namespace {
           // is this the target?
           std::string file;
           unsigned line;
-          if (getInstructionDebugInfo(i, file, line)) {
+          if (getInstructionSourceLocation(i, file, line)) {
             if (line == targetLine && file.find(targetFile) != std::string::npos) {
               // some lines may spawn multiple basic blocks. don't choose a trivial one
               if (b->size() > 1)
@@ -487,7 +497,7 @@ namespace {
   public:
 
     static char ID;
-    Coverage() : ModulePass(ID) {}
+    FlowDistance() : ModulePass(ID) {}
 
     virtual bool runOnModule(Module &M) {
       if (!getTarget())
@@ -499,6 +509,27 @@ namespace {
   };
 }
   
-char Coverage::ID = 0;
+char FlowDistance::ID = 0;
 // Register pass for llvm
-static RegisterPass<Coverage> X("coverage", "Coverage Instrumentation", false, false);
+static RegisterPass<FlowDistance> X("flowdistance", "Compute Flow Distance", false, false);
+/*
+namespace {
+  struct Mypass : public FunctionPass { 
+    static char ID;
+
+    Mypass() : FunctionPass(ID) { } 
+
+    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+      AU.addRequired<DominatorTree>();
+    }
+
+    virtual bool runOnFunction(Function &F) {
+      DominatorTree& DT = getAnalysis<DominatorTree>()
+      return false;
+    }
+  };
+}
+
+char Mypass::ID = 0;
+static RegisterPass<Mypass> X("mypass", "My test analysis", true, true);
+*/

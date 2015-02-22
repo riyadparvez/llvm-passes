@@ -26,9 +26,9 @@ namespace graph {
     Node(const node& src, const node& dest, const V& data = V()) : src(src), dest(dest), data(data){}
     Node(const edge& other) : src(other.src), dest(other.dest), data(other.data){}
     
-    node get_src() const { return src; }
-    node get_dest() const { return dest; }
-    const V& get_data() const { return data; }
+    node getSrc() const { return src; }
+    node getDest() const { return dest; }
+    const V& getData() const { return data; }
   };
   
   template<class T, class V>
@@ -45,6 +45,7 @@ namespace graph {
     Node(int index = -1, const T& data = T()) : index(index), data(data){}
     Node(const Node& other) : index(other.index), data(other.data){}
     
+    typedef typename Node<T, V> node;
     typedef typename Edge<T, V> edge;
     typedef typename std::vector<edge::iterator iterator;
     typedef typename std::vector<edge>::const_iterator const_iterator;
@@ -70,10 +71,23 @@ namespace graph {
 
     size_type degree() const { return edges.size(); }
 
-    int get_index() const { return index; }
-    const T& get_data() const { return data; }
-    const Node<T, V>& get_neighbors() const { 
+    int getIndex() const { return index; }
+    
+    const T& getData() const { return data; }
+    
+    const std::vector<node>& getNeighbors() const { 
       return neighbors; 
+    }
+    
+    const bool getNeighbor(const T& data, node& n) const {
+      for (const_iterator it = edges.begin(), end = edges.end(); 
+           it != end; it++) {
+        if (it->get_dest().get_data() ==  data) { 
+          n = it->get_dest();
+          return true;
+        }
+      }
+      return false;
     }
     //void set_data(const T& data) { this->data = data; }
   };
@@ -123,6 +137,10 @@ namespace graph {
       nodes[dest].addEdge(e);
     }
 
+    void removeEdge() {
+      
+    }
+    
     void computeMinDistance(int src, std::map<T, unsigned>& distances) {
       std::queue<node> q;
       std::set<node> visited;
@@ -152,9 +170,21 @@ namespace graph {
       }
     }
     
-    std::vector<node>& get_nodes() const { return nodes.size(); }
+    const std::vector<node>& getNodes() const { return nodes; }
 
+    const node& getNode(const T& data) const { 
+      //return nodes; 
+      //std::find(nodes.begin(), nodes.end(), data)!=vector.end()
+      for (std::vector<node>::iterator it = nodes.begin(), ite = nodes.end();
+           it != ite; ++it) {
+        if (it->getData() == data) {
+          return *it;
+        }
+      }
+    }
+    
     node& operator[](int i) { return nodes[i]; }
+    
     const node& operator[](int i) const { return nodes[i]; }
   };
 }
